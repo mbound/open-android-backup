@@ -2,7 +2,7 @@
 # This file is imported by backup.sh
 
 # Configuration variables - customize these as needed
-COMPANION_TEMP_DIR="/storage/emulated/0/open-android-backup-temp"
+COMPANION_TEMP_DIR="/storage/emulated/${android_user:-0}/open-android-backup-temp"
 COMPANION_PACKAGE="mrrfv.backup.companion"
 ARCHIVE_PREFIX="open-android-backup"
 TIMESTAMP_FORMAT="%m-%d-%Y-%H-%M-%S"
@@ -69,8 +69,8 @@ function backup_func() {
   cecho "Estimating backup size, please wait..."
 
   local estimated_size
-  enough_free_space "$archive_path" estimated_size
-  local fs_status=$?
+  local fs_status=0
+  enough_free_space "$archive_path" estimated_size || fs_status=$?
   local bkp_size_mb=$(echo "scale=2; $estimated_size/1024" | bc)
 
   if [ $fs_status -ne 0 ]; then
@@ -88,7 +88,7 @@ function backup_func() {
   mkdir -p "$BACKUP_TMP_DIR/SMS"
   mkdir -p "$BACKUP_TMP_DIR/CallLogs"
   if [ "$backup_contacts" = "yes" ]; then
-    adb shell am start -n "$COMPANION_PACKAGE/.MainActivity"
+    adb shell am start --user "$android_user" -n "$COMPANION_PACKAGE/.MainActivity"
     cecho "The companion app has been opened on your device. Please press the 'Export Data' button - this will export contacts/messages to internal storage, allowing this script to back them up. When this is complete, press Enter to continue."
     wait_for_enter
 
@@ -121,10 +121,10 @@ function backup_func() {
   mkdir -p "$BACKUP_TMP_DIR/Apps"
   if [ "$backup_apps" = "yes" ]; then
     cecho "Exporting apps."
-    app_count=$(adb shell pm list packages -3 -f --user 0 | wc -l)
+    app_count=$(adb shell pm list packages -3 -f --user "$android_user" | wc -l)
     apps_exported=0
 
-    for app in $(adb shell pm list packages -3 -f --user 0)
+    for app in $(adb shell pm list packages -3 -f --user "$android_user")
     #   -f: see their associated file
     #   -3: filter to only show third party packages
     do
@@ -146,7 +146,7 @@ function backup_func() {
 
         # Get all the APKs associated with the package name, including split APKs
         # TODO: Ensure the changes made to apk_clean_name don't break this under certain conditions
-        for apk in $(adb shell pm path "$apk_clean_name" | sed 's/package://g' | tr -d '\r'); do
+        for apk in $(adb shell pm path --user "$android_user" "$apk_clean_name" | sed 's/package://g' | tr -d '\r'); do
           # Create a directory for the app to store all the APKs
           mkdir -p "$BACKUP_TMP_DIR/Apps/$apk_clean_name"
           # Save the APK to its directory
@@ -160,7 +160,11 @@ function backup_func() {
   mkdir -p "$BACKUP_TMP_DIR/Storage"
   if [ "$backup_storage" = "yes" ]; then
     cecho "Exporting internal storage - this will take a while."
-    get_file /storage/emulated/0 . "$BACKUP_TMP_DIR/Storage"
+    if ! adb shell ls -d "/storage/emulated/$android_user" >/dev/null 2>&1; then
+      cecho "Selected Android user storage is inaccessible via ADB; aborting to avoid an incomplete backup."
+      return 1
+    fi
+    get_file "/storage/emulated/$android_user" . "$BACKUP_TMP_DIR/Storage"
   fi
 
   # Run the third-party backup hook, if enabled.
@@ -187,6 +191,7 @@ Backed up with settings:
 backup_apps: $backup_apps
 backup_storage: $backup_storage
 backup_contacts: $backup_contacts
+android_user: $android_user
 """ >> "$BACKUP_TMP_DIR/$PLEASE_READ_FILE"
   echo "$APP_VERSION" > "$BACKUP_TMP_DIR/version.txt"
 
