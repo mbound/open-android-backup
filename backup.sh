@@ -84,6 +84,12 @@ fi
 
 clear
 
+select_android_profile || exit 1
+
+if [ "$android_user" != "0" ]; then
+  cecho "WARNING: Android work/secondary profiles may restrict ADB shell access. Profile selection does not bypass Android security."
+fi
+
 if [ ! -v export_method ]; then
   cecho "Choose the exporting/importing method."
   cecho "- Pick 'tar' first, as it is fast and most reliable, but might not work on all devices."
