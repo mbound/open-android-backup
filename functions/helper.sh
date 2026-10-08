@@ -26,8 +26,9 @@ function estimate_backup_size() {
     total=$((total + size))
   fi
   if [ "$backup_apps" = "yes" ]; then
-    size=$(adb shell pm list packages -3 -f --user "$user" 2>/dev/null | sed -n 's/^package:\\(.*\\)=.*$/\\1/p' | while IFS= read -r p; do adb shell stat -c%s "$p" 2>/dev/null; done | awk '{s+=$1} END {printf "%d", s/1024}' || true)
+    size=$(adb shell pm list packages -3 -f --user "$user" 2>/dev/null | awk -F= '/^package:/ {n++;} END {print n*1024}')
     [[ "$size" =~ ^[0-9]+$ ]] || size=0
+    # Rough 1 MB per APK package; avoid shell stat for inaccessible paths.
     total=$((total + size))
   fi
   echo "$total"
