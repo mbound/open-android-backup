@@ -39,7 +39,7 @@ function select_android_profile() {
   local options=()
   users=$(adb shell pm list users 2>&1) || { cecho "Android users could not be enumerated: $users"; return 1; }
   while IFS= read -r line; do
-    if [[ "$line" =~ UserInfo\\{([0-9]+):([^:}]+) ]]; then
+    if [[ "$line" =~ UserInfo[{]([0-9]+):([^:}]+) ]]; then
       id="${BASH_REMATCH[1]}"
       name="${BASH_REMATCH[2]}"
       options+=("$id" "$name")
