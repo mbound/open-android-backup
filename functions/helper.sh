@@ -10,35 +10,56 @@ function wait_for_enter() {
   fi
 }
 
-# Estimate the backup size based on what is backed up
+# Size estimation is best-effort: protected Android directories are skipped.
 function estimate_backup_size() {
-  local backup_size=0
-
+  local total=0 size count uri user="${android_user:-0}"
   if [ "$backup_contacts" = "yes" ]; then
-    local contacts_count=$(adb shell content query --uri content://contacts/people | wc -l)
-    local sms_count=$(adb shell content query --uri content://sms/ | wc -l)
-    local call_log_count=$(adb shell content query --uri content://call_log/calls | wc -l)
-
-    # Here we estimate that a contact is 4 KB, an SMS is 1 KB and a call log is 0,5 KB
-    local contacts_size=$(echo "$contacts_count * 4" | bc)
-    local sms_size=$(echo "$sms_count * 1" | bc)
-    local calls_size=$(echo "$call_log_count * 0.5" | bc)
-    backup_size=$(echo "$backup_size + $contacts_size + $sms_size + $calls_size" | bc)
+    for uri in content://contacts/people content://sms/ content://call_log/calls; do
+      count=$(adb shell content query --user "$user" --uri "$uri" 2>/dev/null | awk 'END {print NR+0}' || true)
+      [[ "$count" =~ ^[0-9]+$ ]] || count=0
+      total=$((total + count * 4))
+    done
   fi
-
   if [ "$backup_storage" = "yes" ]; then
-    # Use du to get the actual used space in KB
-    local storage_size=$(adb shell du -sk /storage/emulated/0 | awk '{print $1}')
-    backup_size=$(echo "$backup_size + $storage_size" | bc)
+    size=$(adb shell du -sk "/storage/emulated/$user" 2>/dev/null | awk '$1 ~ /^[0-9]+$/ {print $1; exit}' || true)
+    [[ "$size" =~ ^[0-9]+$ ]] || size=0
+    total=$((total + size))
   fi
-
   if [ "$backup_apps" = "yes" ]; then
-    local apks_size=$(adb shell 'for p in $(pm list packages -3 -f | sed -E "s/package://; s/=.*//"); do stat -c%s "$p" 2>/dev/null; done' | awk '{s+=$1} END {print int(s/1024)}')
-    backup_size=$(echo "$backup_size + $apks_size" | bc)
+    size=$(adb shell pm list packages -3 -f --user "$user" 2>/dev/null | sed -n 's/^package:\\(.*\\)=.*$/\\1/p' | while IFS= read -r p; do adb shell stat -c%s "$p" 2>/dev/null; done | awk '{s+=$1} END {printf "%d", s/1024}' || true)
+    [[ "$size" =~ ^[0-9]+$ ]] || size=0
+    total=$((total + size))
   fi
+  echo "$total"
+}
 
-  backup_size=$(echo "$backup_size" | awk '{print int($1)}')
-  echo "$backup_size"
+# Android user selection. Does not elevate privileges over other profiles.
+function select_android_profile() {
+  local users line id name chosen found=no i
+  local options=()
+  users=$(adb shell pm list users 2>&1) || { cecho "Android users could not be enumerated: $users"; return 1; }
+  while IFS= read -r line; do
+    if [[ "$line" =~ UserInfo\\{([0-9]+):([^:}]+) ]]; then
+      id="${BASH_REMATCH[1]}"
+      name="${BASH_REMATCH[2]}"
+      options+=("$id" "$name")
+    fi
+  done <<< "$users"
+  [ "${#options[@]}" -gt 0 ] || { cecho "No Android users found."; return 1; }
+  if [ -z "${android_user+x}" ]; then
+    if [ "${#options[@]}" -eq 2 ]; then
+      android_user="${options[0]}"
+    else
+      chosen=$(whiptail --title "Android profile" --menu "Choose a user/profile. Work profiles may restrict ADB access." 20 78 10 "${options[@]}" 3>&1 1>&2 2>&3) || return 1
+      android_user="$chosen"
+    fi
+  fi
+  [[ "$android_user" =~ ^[0-9]+$ ]] || { cecho "Invalid Android user ID."; return 1; }
+  for ((i=0; i<${#options[@]}; i+=2)); do
+    [ "${options[i]}" = "$android_user" ] && found=yes
+  done
+  [ "$found" = yes ] || { cecho "Android user $android_user is not available."; return 1; }
+  cecho "Selected Android user: $android_user"
 }
 
 # Checks if the user has enough free space to backup the device in the current directory
@@ -148,7 +169,7 @@ function uninstall_companion_app() {
   if [ ! -v CI ]; then
     cecho "Attempting to uninstall companion app."
     adb uninstall com.example.companion_app &> /dev/null || true # Legacy companion app
-    adb uninstall mrrfv.backup.companion &> /dev/null || true
+    adb uninstall --user "${android_user:-0}" mrrfv.backup.companion &> /dev/null || true
   fi
 }
 
@@ -174,7 +195,7 @@ function install_companion_app() {
     uninstall_companion_app
     cecho "Installing companion app."
     cecho "IMPORTANT: If this appears to be stuck, check your device for any Play Protect warnings and press 'More details' -> 'Install anyway' to continue. The app is falsely flagged by Google."
-    adb install -r open-android-backup-companion.apk
+    adb install --user "${android_user:-0}" -r open-android-backup-companion.apk
     cecho "Granting required permissions to companion app."
     permissions=(
     'android.permission.READ_CONTACTS'
@@ -184,7 +205,7 @@ function install_companion_app() {
     )
     # Grant permissions
     for permission in "${permissions[@]}"; do
-      adb shell pm grant mrrfv.backup.companion "$permission" || cecho "Couldn't assign permission $permission to the companion app - this is not a fatal error, and you will just have to allow this permission in the app." 1>&2
+      adb shell pm grant --user "${android_user:-0}" mrrfv.backup.companion "$permission" || cecho "Couldn't assign permission $permission to the companion app - this is not a fatal error, and you will just have to allow this permission in the app." 1>&2
     done
   fi
 }
