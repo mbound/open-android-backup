@@ -111,19 +111,19 @@ function restore_func() {
     cecho "Restoring applications."
     # We don't want a single app to break the whole script
     set +e
-    # Apps containing their own directories may contain split APKs, which need to be installed using adb install-multiple.
+    # Apps containing their own directories may contain split APKs, which need to be installed using adb install-multiple --user $android_user.
     # Those without directories were created by past versions of this script and need to be imported the traditional way.
 
     # Determine OS and set a command to install apks
     if [[ "$(uname -r | sed -n 's/.*\( *Microsoft *\).*/\1/ip')" ]]; then
       cecho "Windows/WSL detected"
-      install_cmd="timeout 900 ./windows-dependencies/adb/adb.exe install-multiple"
+      install_cmd="timeout 900 ./windows-dependencies/adb/adb.exe install-multiple --user $android_user"
     elif [[ "$(uname)" == "Darwin" ]]; then
       cecho "macOS detected"
-      install_cmd="gtimeout 900 adb install-multiple"
+      install_cmd="gtimeout 900 adb install-multiple --user $android_user"
     else
       cecho "Linux detected"
-      install_cmd="timeout 900 adb install-multiple"
+      install_cmd="timeout 900 adb install-multiple --user $android_user"
     fi
     # Handle split APKs
     # Find directories in the Apps directory
@@ -147,7 +147,7 @@ function restore_func() {
     if [[ "$(uname -r | sed -n 's/.*\( *Microsoft *\).*/\1/ip')" ]]; then
       cecho "Windows/WSL detected"
       for apk_file in $apk_files; do
-        timeout 900 ./windows-dependencies/adb/adb.exe install "$apk_file"
+        timeout 900 ./windows-dependencies/adb/adb.exe install --user "$android_user" "$apk_file"
       done
     else
       cecho "macOS/Linux detected"
@@ -158,7 +158,7 @@ function restore_func() {
       fi
 
       for apk_file in $apk_files; do
-        $timeout_cmd 900 adb install "$apk_file"
+        $timeout_cmd 900 adb install --user "$android_user" "$apk_file"
       done
     fi
     set -e
@@ -167,17 +167,17 @@ function restore_func() {
   if [ "$restore_storage" = "yes" ]; then
     # Restore internal storage
     cecho "Restoring internal storage."
-    send_file "$BACKUP_TMP_DIR/Storage" . /storage/emulated/0/
+    send_file "$BACKUP_TMP_DIR/Storage" . /storage/emulated/$android_user/
   fi
 
   if [ "$restore_contacts" = "yes" ]; then
     # Restore contacts
     cecho "Pushing backed up contacts to device."
-    # mkdir -p /storage/emulated/0/open-android-backup-temp
-    # get_file "$BACKUP_TMP_DIR/Contacts" . /storage/emulated/0/open-android-backup-temp/
-    adb push "$BACKUP_TMP_DIR/Contacts" /storage/emulated/0/Contacts_Backup
+    # mkdir -p /storage/emulated/$android_user/open-android-backup-temp
+    # get_file "$BACKUP_TMP_DIR/Contacts" . /storage/emulated/$android_user/open-android-backup-temp/
+    adb push "$BACKUP_TMP_DIR/Contacts" /storage/emulated/$android_user/Contacts_Backup
 
-    adb shell am start -n mrrfv.backup.companion/.MainActivity
+    adb shell am start --user "$android_user" -n mrrfv.backup.companion/.MainActivity
     cecho "The companion app has been opened on your device. Please press the 'Auto-restore contacts' button - this will import your contacts to the device's contact database. Press Enter to continue."
     wait_for_enter
   fi
@@ -195,7 +195,7 @@ function restore_func() {
 
   cecho "Cleaning up..."
   if [ "$restore_contacts" = "yes" ]; then
-    adb shell rm -rf /storage/emulated/0/open-android-backup-temp
+    adb shell rm -rf /storage/emulated/$android_user/open-android-backup-temp
   fi
   uninstall_companion_app
   remove_backup_tmp
