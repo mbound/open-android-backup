@@ -164,7 +164,7 @@ function backup_func() {
       cecho "Selected Android user storage is inaccessible via ADB; aborting to avoid an incomplete backup."
       return 1
     fi
-    get_file "/storage/emulated/$android_user" . "$BACKUP_TMP_DIR/Storage"
+    get_file "/storage/emulated/$android_user" . "$BACKUP_TMP_DIR/Storage" || { cecho "Storage backup failed for Android user $android_user."; return 1; }
   fi
 
   # Run the third-party backup hook, if enabled.
